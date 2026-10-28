@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quillfall: a typing roguelike</title>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f2eefb;--panel:#e2daf5;--ink:#241f3a;--dim:#645c8a;--acc:#d63a63;--gold:#946406;--ok:#1b7f5a;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16132a;--panel:#231e40;--ink:#ece8fa;--dim:#9a93c0;--acc:#ff7a98;--gold:#f2c14e;--ok:#5fd4a3;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16132a;--panel:#231e40;--ink:#ece8fa;--dim:#9a93c0;--acc:#ff7a98;--gold:#f2c14e;--ok:#5fd4a3;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:'Pixelify Sans',ui-monospace,Menlo,Consolas,monospace;font-size:18px;line-height:1.4}
+#app{max-width:640px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;padding:16px}
+#app.idle header,#app.idle main,#app.idle footer{visibility:hidden}
+header{display:flex;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:2px solid var(--panel)}
+#hp{color:var(--acc)}#gold{color:var(--gold)}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center}
+#sprite{font-size:clamp(4rem,22vw,7rem);line-height:1}
+#epips{letter-spacing:.2em;color:var(--acc)}
+#word{font-size:clamp(2rem,10vw,3.6rem);letter-spacing:.06em;margin:14px 0 6px}
+#word .d{color:var(--ok)}
+#word .c{border-bottom:4px solid var(--acc)}
+.bar{width:100%;height:10px;background:var(--panel);border-radius:5px;overflow:hidden}
+#bar{display:block;height:100%;width:100%;background:var(--acc)}
+#combo{color:var(--dim);min-height:1.4em}
+footer{display:flex;flex-wrap:wrap;gap:6px;min-height:34px;padding-top:12px}
+.chip{background:var(--panel);padding:2px 10px;border-radius:12px;font-size:15px}
+#overlay{display:none;position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 90%,transparent);align-items:center;justify-content:center;padding:16px;z-index:5}
+#overlay.on{display:flex}
+.panel{background:var(--panel);border-radius:14px;padding:24px;max-width:440px;width:100%;display:flex;flex-direction:column;gap:10px}
+.panel h1,.panel h2{margin:0;font-weight:600}
+.panel p{margin:0;color:var(--dim)}
+.panel button{font:inherit;color:inherit;text-align:left;background:var(--bg);border:2px solid transparent;border-radius:10px;padding:10px 14px;cursor:pointer;display:flex;flex-direction:column}
+.panel button:hover,.panel button:focus-visible{border-color:var(--acc);outline:none}
+.panel button span{color:var(--dim);font-size:16px}
+.panel button.go{background:var(--acc);color:var(--bg);text-align:center;font-weight:600}
+#kb{position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0}
+.shake{animation:sh .18s}.pop{animation:pp .15s}
+@keyframes sh{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+@keyframes pp{50%{transform:scale(1.2)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app" class="idle">
+  <header><div id="floor"></div><div id="hp"></div><div id="gold"></div></header>
+  <main>
+    <div id="sprite"></div>
+    <div id="ename"></div>
+    <div id="epips"></div>
+    <div id="word"></div>
+    <div class="bar"><i id="bar"></i></div>
+    <div id="combo"></div>
+  </main>
+  <footer id="relics"></footer>
+</div>
+<div id="overlay"></div>
+<input id="kb" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Type here">
+<script>
+const $=id=>document.getElementById(id);
+const rnd=a=>a[Math.floor(Math.random()*a.length)];
+const W="ink page rune moth bone ash hex veil omen dusk tomb quill ember crypt gloom thorn raven spell curse blade flame ghoul altar torch relic skull candle shadow dagger hollow wraith cinder shard dragon fabled cursed sigil scroll lantern whisper marrow phantom grimoire sorcery obsidian eclipse nightfall labyrinth gargoyle necrotic undertow cathedral tombstone catacomb darkness vengeance sepulchre".split(" ");
+const E=[["Bat","🦇"],["Rat","🐀"],["Ghost","👻"],["Spider","🕷️"],["Skeleton","💀"],["Zombie","🧟"],["Vampire","🧛"]];
+const B=[["Warden","👹"],["Inkwyrm","🐉"],["Lich","☠️"]];
+const R=[
+ {id:"quill",n:"Sharp Quill",d:"Words deal +1 damage"},
+ {id:"sand",n:"Slow Sand",d:"+30% time per word"},
+ {id:"jar",n:"Heart Jar",d:"+3 max HP and heal 3"},
+ {id:"purse",n:"Gilded Purse",d:"+50% gold"},
+ {id:"flame",n:"Combo Flame",d:"+1 damage at a 8+ letter streak"},
+ {id:"ink",n:"Forgiving Ink",d:"First typo of each word is free"},
+ {id:"fang",n:"Vampire Fang",d:"Heal 1 HP when you slay a foe"}
+];
+let best=0;try{best=+localStorage.getItem("qf_best")||0}catch(e){}
+let S=null,last=0,raf=0;
+const has=id=>S.relics.includes(id);
+const fx=(el,c)=>{el.classList.remove(c);void el.offsetWidth;el.classList.add(c)};
+
+function title(){
+  $("overlay").className="on";
+  $("overlay").innerHTML=`<div class="panel"><h1>Quillfall</h1>
+  <p>Descend the crypt. Type each word before its timer runs out to strike. Slay the boss to claim a relic. One life only.</p>
+  ${best?`<p>Best: floor ${best}</p>`:""}
+  <button class="go" data-go>Start descent</button></div>`;
+}
+function newRun(){
+  S={floor:1,enc:0,hp:10,max:10,gold:0,combo:0,words:0,relics:[],mode:"fight"};
+  $("app").classList.remove("idle");
+  startEnc();
+}
+function startEnc(){
+  const boss=S.enc===2,f=S.floor,e=boss?rnd(B):rnd(E),hp=boss?3+f:1+Math.ceil(f/2);
+  S.enemy={n:e[0],s:e[1],boss,hp,max:hp};
+  S.mode="fight";S.word="";
+  $("overlay").className="";
+  nextWord();render();
+  cancelAnimationFrame(raf);last=performance.now();raf=requestAnimationFrame(tick);
+  $("kb").focus();
+}
+function nextWord(){
+  const f=S.floor,b=S.enemy.boss;
+  const lo=Math.min(3+Math.floor(f/2),7)+(b?1:0),hi=Math.min(5+f,10)+(b?2:0);
+  let pool=W.filter(w=>w.length>=lo&&w.length<=hi);if(!pool.length)pool=W;
+  let w;do{w=rnd(pool)}while(w===S.word&&pool.length>1);
+  S.word=w;S.pos=0;S.typo=false;
+  S.tmax=(1.8+.5*w.length)*Math.max(.5,1-.04*f)*(has("sand")?1.3:1);
+  S.t=S.tmax;drawWord();
+}
+function tick(now){
+  const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(S.mode!=="fight")return;
+  S.t-=dt;
+  if(S.t<=0)hurt();
+  if(S.mode!=="fight")return;
+  $("bar").style.width=Math.max(0,S.t/S.tmax*100)+"%";
+  raf=requestAnimationFrame(tick);
+}
+function hurt(){
+  S.hp-=1+Math.floor((S.floor-1)/3)+(S.enemy.boss?1:0);
+  S.combo=0;fx($("app"),"shake");
+  if(S.hp<=0){S.hp=0;die();return}
+  S.pos=0;S.typo=false;S.t=S.tmax;drawWord();hud();
+}
+function onChar(c){
+  if(!S||S.mode!=="fight"||!/\S/.test(c))return;
+  if(c===S.word[S.pos]){
+    S.pos++;S.combo++;
+    if(S.pos===S.word.length)hit();else drawWord();
+  }else{
+    if(!(has("ink")&&!S.typo)){S.combo=0;S.t=Math.max(.1,S.t-.5)}
+    S.typo=true;fx($("word"),"shake");
+  }
+  hud();
+}
+function hit(){
+  S.words++;
+  S.gold+=Math.round((1+S.floor)*(has("purse")?1.5:1));
+  S.enemy.hp-=1+(has("quill")?1:0)+(has("flame")&&S.combo>=8?1:0);
+  fx($("sprite"),"pop");
+  if(S.enemy.hp<=0)slay();else nextWord();
+  render();
+}
+function slay(){
+  if(has("fang"))S.hp=Math.min(S.max,S.hp+1);
+  if(S.enemy.boss){reward();return}
+  S.enc++;startEnc();
+}
+function reward(){
+  S.mode="reward";
+  const pool=R.filter(r=>r.id==="jar"||!has(r.id));
+  const picks=[...pool].sort(()=>Math.random()-.5).slice(0,3);
+  $("overlay").className="on";
+  $("overlay").innerHTML=`<div class="panel"><h2>Floor ${S.floor} cleared</h2><p>Choose a relic for the road ahead.</p>
+  ${picks.map(r=>`<button data-r="${r.id}"><b>${r.n}</b><span>${r.d}</span></button>`).join("")}
+  <button data-r="rest"><b>Rest</b><span>Heal 4 HP and keep going</span></button></div>`;
+}
+function pick(id){
+  if(id==="rest")S.hp=Math.min(S.max,S.hp+4);
+  else{S.relics.push(id);if(id==="jar"){S.max+=3;S.hp=Math.min(S.max,S.hp+3)}}
+  S.floor++;S.enc=0;startEnc();
+}
+function die(){
+  S.mode="dead";
+  if(S.floor>best){best=S.floor;try{localStorage.setItem("qf_best",best)}catch(e){}}
+  hud();
+  $("overlay").className="on";
+  $("overlay").innerHTML=`<div class="panel"><h2>You fell on floor ${S.floor}</h2>
+  <p>${S.words} words typed · ${S.gold} gold · best floor ${best}</p>
+  <button class="go" data-go>Descend again</button></div>`;
+}
+function drawWord(){
+  const w=S.word,p=S.pos;
+  $("word").innerHTML=`<span class="d">${w.slice(0,p)}</span><span class="c">${w[p]||""}</span>${w.slice(p+1)}`;
+}
+function hud(){
+  $("hp").textContent=`♥ ${S.hp}/${S.max}`;
+  $("gold").textContent=`◆ ${S.gold}`;
+  $("combo").textContent=S.combo>1?`Streak ${S.combo}`:"";
+}
+function render(){
+  if(!S)return;
+  const e=S.enemy;
+  $("floor").textContent=`Floor ${S.floor} · Room ${S.enc+1}/3`;
+  $("sprite").textContent=e.s;
+  $("ename").textContent=e.boss?`${e.n}, floor boss`:e.n;
+  $("epips").textContent="■".repeat(Math.max(0,e.hp))+"□".repeat(Math.max(0,e.max-e.hp));
+  $("relics").innerHTML=S.relics.map(id=>{const r=R.find(x=>x.id===id);return `<span class="chip" title="${r.d}">${r.n}</span>`}).join("");
+  hud();
+}
+$("overlay").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  if(b.hasAttribute("data-go"))newRun();
+  else if(b.dataset.r)pick(b.dataset.r);
+});
+const kb=$("kb");
+kb.addEventListener("input",()=>{for(const c of kb.value.toLowerCase())onChar(c);kb.value=""});
+document.addEventListener("click",e=>{if(!e.target.closest("button"))kb.focus()});
+document.addEventListener("keydown",e=>{if(document.activeElement!==kb&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&e.key.length===1)kb.focus()});
+title();
+</script>
+</body>
+</html>
